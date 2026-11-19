@@ -1,0 +1,6 @@
+{
+  "name": "ProfileGrid",
+  "description": "Multi-device browser automation, proxy verification, automated fingerprinting, and isolated session management workbench.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

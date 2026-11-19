@@ -1,0 +1,30 @@
+appId: com.profilegrid.desktop
+productName: ProfileGrid
+directories:
+  output: dist-desktop
+asar: false
+npmRebuild: false
+compression: store
+files:
+  - desktop/main.cjs
+  - dist/**
+  - dist-server/**
+  - package.json
+  - "!node_modules/**"
+extraResources:
+  - from: node_modules/playwright-core
+    to: app/node_modules/playwright-core
+win:
+  signAndEditExecutable: false
+  target:
+    - target: portable
+      arch:
+        - x64
+portable:
+  artifactName: "ProfileGrid-Portable.${ext}"
+nsis:
+  artifactName: "ProfileGrid-Setup.${ext}"
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
