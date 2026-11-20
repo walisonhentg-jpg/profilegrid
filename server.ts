@@ -4,7 +4,11 @@ import dns from 'node:dns/promises';
 import fs from 'node:fs';
 import path from 'node:path';
 import { generateFingerprint } from './src/lib/fingerprint.ts';
-import { parseUserAgent, PRESET_USER_AGENTS } from './src/lib/uaParser.ts';
+import {
+  extractUserAgentLines,
+  parseUserAgent,
+  PRESET_USER_AGENTS,
+} from './src/lib/uaParser.ts';
 import {
   startAutomationCampaign,
   stopActiveAutomation,
@@ -80,24 +84,34 @@ async function startServer() {
 
   // User-Agents Import
   app.post('/api/user-agents/import', (req, res) => {
-    const { rawText, list, autoProvision = true } = req.body as {
+    const {
+      rawText,
+      list,
+      autoProvision = true,
+      allowDuplicates = true,
+    } = req.body as {
       rawText?: string;
       list?: string[];
       autoProvision?: boolean;
+      allowDuplicates?: boolean;
     };
     const lines = Array.isArray(list)
-      ? list
+      ? list.flatMap((item) => extractUserAgentLines(String(item ?? '')))
       : typeof rawText === 'string'
-        ? rawText.split(/\r?\n/)
+        ? extractUserAgentLines(rawText)
         : [];
 
     const store = getState();
     const existingRaw = new Set(store.userAgents.map((u) => u.raw));
     const added = [];
+    let skippedDuplicates = 0;
 
-    for (const line of lines) {
-      const cleaned = line.trim();
-      if (!cleaned || cleaned.startsWith('#') || existingRaw.has(cleaned)) continue;
+    for (const cleaned of lines) {
+      if (!cleaned) continue;
+      if (!allowDuplicates && existingRaw.has(cleaned)) {
+        skippedDuplicates += 1;
+        continue;
+      }
       existingRaw.add(cleaned);
       added.push(parseUserAgent(cleaned));
     }
@@ -111,6 +125,8 @@ async function startServer() {
     }
     res.json({
       addedCount: added.length,
+      skippedDuplicates,
+      totalParsed: lines.length,
       added,
       userAgents: getState().userAgents,
       devices: getState().devices,

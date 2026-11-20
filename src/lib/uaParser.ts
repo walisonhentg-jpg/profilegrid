@@ -4,21 +4,113 @@ function makeId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
 }
 
+function stripUaWrapper(line: string): string {
+  let s = line.trim();
+  // Strip trailing comma/semicolon left over from JSON/CSV/lists
+  s = s.replace(/[,;]+$/, '').trim();
+  // Strip surrounding matching quotes
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  // Strip leading list markers like "1. ", "1) ", "- ", "* ", "#1 "
+  s = s.replace(/^(?:#?\d+[.):\-]\s*|[-*•]\s+)/, '').trim();
+  // Strip optional label prefix before Mozilla/ or Dalvik/ (e.g. "FB iOS: Mozilla/5.0...")
+  const uaStart = s.search(/(?:Mozilla|Dalvik)\/\d/i);
+  if (uaStart > 0 && uaStart < 45) {
+    const prefix = s.slice(0, uaStart).trim();
+    if (/^[a-z0-9\s._/\-|()[\]:]+$/i.test(prefix)) {
+      s = s.slice(uaStart).trim();
+    }
+  }
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  return s;
+}
+
+export function extractUserAgentLines(rawInput: string): string[] {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return [];
+
+  // 1. Handle JSON arrays/objects pasted directly
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      const items = Array.isArray(parsed) ? parsed : [parsed];
+      const extracted: string[] = [];
+      for (const item of items) {
+        const val =
+          typeof item === 'string'
+            ? item
+            : item && typeof item === 'object'
+              ? ((item as Record<string, unknown>).userAgent ??
+                  (item as Record<string, unknown>).ua ??
+                  (item as Record<string, unknown>).user_agent ??
+                  (item as Record<string, unknown>).raw)
+              : null;
+        if (typeof val === 'string' && val.trim().length >= 8) {
+          extracted.push(stripUaWrapper(val));
+        }
+      }
+      if (extracted.length > 0) return extracted.filter(Boolean);
+    } catch {
+      // Fallback to line/token extraction below
+    }
+  }
+
+  // 2. Split by newlines, pipes, tabs, or concatenated Mozilla/Dalvik tokens on the same line
+  const results: string[] = [];
+  for (const rawLine of trimmed.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    // Skip pure comments unless they actually contain a UA string
+    if (
+      (line.startsWith('#') || line.startsWith('//')) &&
+      !/(?:Mozilla|Dalvik)\/\d|FBAN\/|FBAV\/|Instagram\s+\d|youtube/i.test(line)
+    ) {
+      continue;
+    }
+
+    // Split on pipes or tabs between entries, then split before any mid-line Mozilla/N or Dalvik/N
+    const primaryParts = line.split(/\s*\|\s*|\t+/);
+    for (const part of primaryParts) {
+      const normalized = part
+        .replace(/["']?\s*,\s*["']?(?=(?:Mozilla|Dalvik)\/\d)/gi, '\n')
+        .replace(/\s+(?=(?:Mozilla|Dalvik)\/\d)/gi, '\n');
+
+      for (const piece of normalized.split('\n')) {
+        const cleaned = stripUaWrapper(piece);
+        if (cleaned.length >= 8) {
+          results.push(cleaned);
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
 export function parseUserAgent(rawInput: string, idOverride?: string): UserAgentEntry {
   const raw = rawInput.trim();
   const ua = raw;
 
   let browser = 'Chrome';
   let browserVersion = '131.0';
-  if (/Instagram\s+([\d.]+)/i.test(ua)) {
+  if (/Instagram[\s/]+([\d.]+)/i.test(ua)) {
     browser = 'Instagram App';
-    browserVersion = ua.match(/Instagram\s+([\d.]+)/i)?.[1] ?? '358.0';
-  } else if (/FBAV\/([\d.]+)|FBAN\/|FB_IAB\//i.test(ua)) {
+    browserVersion = ua.match(/Instagram[\s/]+([\d.]+)/i)?.[1] ?? '358.0';
+  } else if (/FBAV\/([\d.]+)|FBAN\/|FB_IAB\/|FB4A|FBIOS/i.test(ua)) {
     browser = 'Facebook App';
     browserVersion = ua.match(/FBAV\/([\d.]+)/i)?.[1] ?? '490.0';
-  } else if (/com\.google\.(?:android|ios)\.youtube\/([\d.]+)|YouTube\/([\d.]+)/i.test(ua)) {
+  } else if (/com\.google\.(?:android|ios)\.youtube\/([\d.]+)|YouTube[\s/]+([\d.]+)/i.test(ua)) {
     browser = 'YouTube App';
-    const ym = ua.match(/(?:com\.google\.(?:android|ios)\.youtube|YouTube)\/([\d.]+)/i);
+    const ym = ua.match(/(?:com\.google\.(?:android|ios)\.youtube|YouTube)[\s/]+([\d.]+)/i);
     browserVersion = ym?.[1] ?? '19.45';
   } else if (/EdgA?\/([\d.]+)/.test(ua)) {
     browser = 'Edge';
@@ -62,7 +154,7 @@ export function parseUserAgent(rawInput: string, idOverride?: string): UserAgent
     os = 'Android';
     osVersion = ua.match(/Android ([\d.]+)/)?.[1] ?? '14';
     platform = 'Linux armv81';
-    mobile = /Mobile|FB4A|FB_IAB|Instagram|youtube/i.test(ua) && !/Tablet/i.test(ua);
+    mobile = /Mobile|FB4A|FB_IAB|FBAV|FBAN|Instagram|youtube/i.test(ua) && !/Tablet/i.test(ua);
     deviceType = mobile ? 'Mobile' : 'Tablet';
   } else if (/Macintosh|Mac OS X/.test(ua)) {
     os = 'macOS';

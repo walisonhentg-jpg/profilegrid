@@ -22,14 +22,16 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 export const api = {
   getState: () => request<WorkspaceState>('/api/state'),
 
-  importUserAgents: (rawText: string) =>
+  importUserAgents: (rawText: string, allowDuplicates = true) =>
     request<{
       addedCount: number;
+      skippedDuplicates?: number;
+      totalParsed?: number;
       userAgents: UserAgentEntry[];
       devices: DeviceProfile[];
     }>('/api/user-agents/import', {
       method: 'POST',
-      body: JSON.stringify({ rawText }),
+      body: JSON.stringify({ rawText, allowDuplicates }),
     }),
 
   deleteUserAgent: (id: string) =>

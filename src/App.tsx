@@ -263,14 +263,21 @@ export default function App() {
               {activeTab === 'user-agents' && (
                 <UserAgentPoolView
                   userAgents={state.userAgents}
-                  onImport={async (rawText) => {
-                    const res = await api.importUserAgents(rawText);
+                  devicesCount={state.devices.length}
+                  proxiesCount={state.proxies.length}
+                  onImport={async (rawText, allowDuplicates = true) => {
+                    const res = await api.importUserAgents(rawText, allowDuplicates);
                     setState((prev) => ({
                       ...prev,
                       userAgents: res.userAgents,
                       devices: res.devices,
                     }));
-                    return { addedCount: res.addedCount };
+                    return {
+                      addedCount: res.addedCount,
+                      skippedDuplicates: res.skippedDuplicates,
+                      totalParsed: res.totalParsed,
+                      devicesCount: res.devices.length,
+                    };
                   }}
                   onDelete={async (id) => {
                     const res = await api.deleteUserAgent(id);

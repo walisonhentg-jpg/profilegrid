@@ -9,23 +9,39 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { PRESET_USER_AGENTS, SOCIAL_APP_USER_AGENTS } from '../lib/uaParser.ts';
+import {
+  extractUserAgentLines,
+  PRESET_USER_AGENTS,
+  SOCIAL_APP_USER_AGENTS,
+} from '../lib/uaParser.ts';
 import type { UserAgentEntry } from '../types/automation.ts';
+
+interface ImportResult {
+  addedCount: number;
+  skippedDuplicates?: number;
+  totalParsed?: number;
+  devicesCount?: number;
+}
 
 interface UserAgentPoolViewProps {
   userAgents: UserAgentEntry[];
-  onImport: (rawText: string) => Promise<{ addedCount: number }>;
+  devicesCount?: number;
+  proxiesCount?: number;
+  onImport: (rawText: string, allowDuplicates?: boolean) => Promise<ImportResult>;
   onDelete: (id: string) => Promise<void>;
   onClearAll: () => Promise<void>;
 }
 
 export function UserAgentPoolView({
   userAgents,
+  devicesCount = 0,
+  proxiesCount = 0,
   onImport,
   onDelete,
   onClearAll,
 }: UserAgentPoolViewProps) {
   const [pasteText, setPasteText] = useState('');
+  const [allowDuplicates, setAllowDuplicates] = useState(true);
   const [importing, setImporting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -47,14 +63,39 @@ export function UserAgentPoolView({
     });
   }, [userAgents, deviceFilter, search]);
 
+  const parsedReadyCount = useMemo(
+    () => extractUserAgentLines(pasteText).length,
+    [pasteText]
+  );
+
+  function formatImportFeedback(res: ImportResult, sourceLabel?: string): string {
+    const base = sourceLabel
+      ? `Imported ${res.addedCount} User-Agent(s) from ${sourceLabel}.`
+      : `Connected ${res.addedCount} User-Agent string(s) into pool.`;
+    const parts = [base];
+    if (res.skippedDuplicates && res.skippedDuplicates > 0) {
+      parts.push(`(${res.skippedDuplicates} duplicate skipped)`);
+    }
+    if (
+      proxiesCount > 0 &&
+      typeof res.devicesCount === 'number' &&
+      userAgents.length + res.addedCount > res.devicesCount
+    ) {
+      parts.push(
+        `— ${res.devicesCount} device(s) paired (1:1 with available proxies).`
+      );
+    }
+    return parts.join(' ');
+  }
+
   async function handleImportSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!pasteText.trim()) return;
     setImporting(true);
     setFeedback(null);
     try {
-      const res = await onImport(pasteText);
-      setFeedback(`Connected ${res.addedCount} new User-Agent string(s) into pool.`);
+      const res = await onImport(pasteText, allowDuplicates);
+      setFeedback(formatImportFeedback(res));
       setPasteText('');
     } finally {
       setImporting(false);
@@ -65,8 +106,8 @@ export function UserAgentPoolView({
     setImporting(true);
     setFeedback(null);
     try {
-      const res = await onImport(PRESET_USER_AGENTS.join('\n'));
-      setFeedback(`Added ${res.addedCount} preset User-Agent string(s).`);
+      const res = await onImport(PRESET_USER_AGENTS.join('\n'), false);
+      setFeedback(formatImportFeedback(res));
     } finally {
       setImporting(false);
     }
@@ -76,8 +117,12 @@ export function UserAgentPoolView({
     setImporting(true);
     setFeedback(null);
     try {
-      const res = await onImport(SOCIAL_APP_USER_AGENTS.join('\n'));
-      setFeedback(`Added ${res.addedCount} Facebook, Instagram & YouTube in-app User-Agent(s).`);
+      const res = await onImport(SOCIAL_APP_USER_AGENTS.join('\n'), false);
+      setFeedback(
+        `Added ${res.addedCount} Facebook, Instagram & YouTube in-app User-Agent(s)${
+          res.skippedDuplicates ? ` (${res.skippedDuplicates} already in pool)` : ''
+        }.`
+      );
     } finally {
       setImporting(false);
     }
@@ -87,30 +132,13 @@ export function UserAgentPoolView({
     const file = e.target.files?.[0];
     if (!file) return;
     const text = await file.text();
-    let parsedLines = text;
-    if (file.name.endsWith('.json')) {
-      try {
-        const json = JSON.parse(text);
-        if (Array.isArray(json)) {
-          parsedLines = json
-            .map((item) =>
-              typeof item === 'string'
-                ? item
-                : typeof item?.userAgent === 'string'
-                  ? item.userAgent
-                  : ''
-            )
-            .filter(Boolean)
-            .join('\n');
-        }
-      } catch {
-        // Fallback to raw lines
-      }
-    }
+    const extracted = extractUserAgentLines(text);
+    const payloadText = extracted.length > 0 ? extracted.join('\n') : text;
     setImporting(true);
+    setFeedback(null);
     try {
-      const res = await onImport(parsedLines);
-      setFeedback(`Imported ${res.addedCount} User-Agent string(s) from ${file.name}.`);
+      const res = await onImport(payloadText, allowDuplicates);
+      setFeedback(formatImportFeedback(res, file.name));
     } finally {
       setImporting(false);
       e.target.value = '';
@@ -176,21 +204,30 @@ export function UserAgentPoolView({
             className="w-full p-3 text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white"
           />
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-xs text-slate-500">
+            <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
               {feedback ? (
                 <span className="text-emerald-700 font-medium inline-flex items-center gap-1.5">
-                  <Check className="h-3.5 w-3.5" />
-                  {feedback}
+                  <Check className="h-3.5 w-3.5 shrink-0" />
+                  <span>{feedback}</span>
                 </span>
               ) : (
                 <span>
-                  {pasteText.split(/\r?\n/).filter((l) => l.trim()).length} lines ready to connect
+                  {parsedReadyCount} User-Agent{parsedReadyCount === 1 ? '' : 's'} ready to connect
                 </span>
               )}
+              <label className="inline-flex items-center gap-1.5 text-slate-600 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={allowDuplicates}
+                  onChange={(e) => setAllowDuplicates(e.target.checked)}
+                  className="rounded border-slate-300 text-blue-600"
+                />
+                <span>Allow duplicate UAs</span>
+              </label>
             </div>
             <button
               type="submit"
-              disabled={importing || !pasteText.trim()}
+              disabled={importing || parsedReadyCount === 0}
               className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
             >
               <Plus className="h-3.5 w-3.5" />
