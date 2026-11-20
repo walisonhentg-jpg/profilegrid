@@ -27,7 +27,7 @@ jobs:
           npx esbuild server.ts --bundle --platform=node --format=cjs --outfile=dist-server/server.cjs --external:vite --external:@tailwindcss/vite --external:lightningcss --external:playwright-core
 
       - name: Build Windows EXE
-        run: npx electron-builder --config desktop/electron-builder.yml --win
+        run: npx electron-builder --config desktop/electron-builder.yml --win --publish never
 
       - name: Upload Windows EXE artifacts
         uses: actions/upload-artifact@v4
