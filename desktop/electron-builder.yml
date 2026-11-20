@@ -20,6 +20,9 @@ win:
     - target: portable
       arch:
         - x64
+    - target: nsis
+      arch:
+        - x64
 portable:
   artifactName: "ProfileGrid-Portable.${ext}"
 nsis:
